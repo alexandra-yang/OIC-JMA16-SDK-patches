@@ -1,0 +1,43 @@
+Index: qca-wifi-g/offload/wlan/lmac_offload_if/ol_if_stats.c
+===================================================================
+--- qca-wifi-g.orig/offload/wlan/lmac_offload_if/ol_if_stats.c
++++ qca-wifi-g/offload/wlan/lmac_offload_if/ol_if_stats.c
+@@ -376,6 +376,8 @@ int ol_scan_chan_stats_update(struct iee
+                 chan_stats[i].tx_frm_cnt += delta.tx_frame_count;
+                 chan_stats[i].rx_frm_cnt += delta.rx_frame_count;
+                 chan_stats[i].bss_rx_cnt += delta.my_bss_rx_cycle_count;
++                chan_stats[i].noise_floor =
++                  (ic->ic_is_target_lithium(wlan_pdev_get_psoc(ic->ic_pdev_obj))?ic->ic_get_cur_hw_nf(ic):ic->ic_get_cur_chan_nf(ic));
+                 break;
+             }
+         }
+@@ -860,6 +862,8 @@ void ol_chan_stats_event (struct ieee802
+     ic->ic_channel_stats.home_chan_stats.rx_frm_cnt += delta.rx_frame_count;
+     ic->ic_channel_stats.home_chan_stats.bss_rx_cnt += delta.my_bss_rx_cycle_count;
+     ic->ic_channel_stats.home_chan_stats.ext_busy_cnt += delta.rx_clear_ext_count;
++    ic->ic_channel_stats.home_chan_stats.noise_floor =
++        (ic->ic_is_target_lithium(wlan_pdev_get_psoc(ic->ic_pdev_obj))?ic->ic_get_cur_hw_nf(ic):ic->ic_get_cur_chan_nf(ic));
+     qdf_spin_unlock_bh(&ic->ic_channel_stats.lock);
+ 
+     IEEE80211_DPRINTF_IC(ic, IEEE80211_VERBOSE_NORMAL,
+Index: qca-wifi-g/os/linux/include/ieee80211_ioctl.h
+===================================================================
+--- qca-wifi-g.orig/os/linux/include/ieee80211_ioctl.h
++++ qca-wifi-g/os/linux/include/ieee80211_ioctl.h
+@@ -2670,6 +2670,8 @@ struct event_data_scan {
+ 
+ #endif /* QCA_LTEU_SUPPORT */
+ 
++#define IEEE80211_CHAN_NOISE_FLOOR_SUPPORTED
++
+ struct channel_stats {
+     uint32_t freq;           /* Channel frequency */
+     uint64_t cycle_cnt;      /* Cumulative sum of cycle cnt delta */
+@@ -2678,6 +2680,7 @@ struct channel_stats {
+     uint64_t clear_cnt;      /* Cumulative sum of clear cnt delta */
+     uint64_t ext_busy_cnt;   /* Cumulative sum of ext busy cnt delta */
+     uint64_t bss_rx_cnt;     /* Cumulative sum of own bss rx cnt delta */
++    int16_t  noise_floor;    /* Channel noise floor */
+ };
+ 
+ #endif /* _NET80211_IEEE80211_IOCTL_H_ */

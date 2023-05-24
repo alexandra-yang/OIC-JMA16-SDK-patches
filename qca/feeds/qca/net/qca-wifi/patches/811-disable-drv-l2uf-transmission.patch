@@ -1,0 +1,11 @@
+--- a/os/linux/src/osif_umac.c
++++ b/os/linux/src/osif_umac.c
+@@ -3334,7 +3334,7 @@ osif_assoc_indication_ap(os_handle_t osi
+ 
+ #if DBDC_REPEATER_SUPPORT || UMAC_SUPPORT_SON
+     /* To send L2UF on same VAP, to which client connects */
+-    osif_hardstart_l2uf(osif, macaddr);
++    //osif_hardstart_l2uf(osif, macaddr);
+ #endif
+ 
+ #if UMAC_SUPPORT_ACFG

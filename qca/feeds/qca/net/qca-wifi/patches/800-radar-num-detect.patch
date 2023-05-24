@@ -1,0 +1,69 @@
+
+Subject: [PATCH] qcacmn: Increment num_radar_detects for FO everytime radar is
+ detected
+
+With the current implementation, dfs->wlan_dfs_stats.num_radar_detects
+is incremented for radar detections in partial offload alone. For FO,
+this stat was not incremented. As a result, when the number of times
+radar has been detected is queried with radartool, the stat always
+returns 0.
+
+Fix this by incrementing this stat for FO chipsets as well.
+Index: qca-wifi-g/cmn_dev/umac/dfs/core/src/misc/dfs_process_radar_found_ind.c
+===================================================================
+--- qca-wifi-g.orig/cmn_dev/umac/dfs/core/src/misc/dfs_process_radar_found_ind.c
++++ qca-wifi-g/cmn_dev/umac/dfs/core/src/misc/dfs_process_radar_found_ind.c
+@@ -959,6 +959,14 @@ bool dfs_process_nol_ie_bitmap(struct wl
+ }
+ #endif
+ 
++#ifdef WLAN_DFS_FULL_OFFLOAD
++void dfs_inc_num_radar(struct wlan_dfs *dfs)
++{
++	dfs->wlan_dfs_stats.num_radar_detects++;
++}
++#endif /* WLAN_DFS_FULL_OFFLOAD */
++
++
+ #ifdef WLAN_DFS_TRUE_160MHZ_SUPPORT
+ #define DFS_80P80MHZ_SECOND_SEG_OFFSET 85
+ /**
+Index: qca-wifi-g/cmn_dev/umac/dfs/dispatcher/src/wlan_dfs_tgt_api.c
+===================================================================
+--- qca-wifi-g.orig/cmn_dev/umac/dfs/dispatcher/src/wlan_dfs_tgt_api.c
++++ qca-wifi-g/cmn_dev/umac/dfs/dispatcher/src/wlan_dfs_tgt_api.c
+@@ -657,6 +657,7 @@ QDF_STATUS tgt_dfs_process_radar_ind(str
+ 	dfs->dfs_radar_found_for_fo = 1;
+ 	status = dfs_process_radar_ind(dfs, radar_found);
+ 	dfs->dfs_radar_found_for_fo = 0;
++	dfs_inc_num_radar(dfs);
+ 
+ 	return status;
+ }
+Index: qca-wifi-g/cmn_dev/umac/dfs/core/src/dfs_process_radar_found_ind.h
+===================================================================
+--- qca-wifi-g.orig/cmn_dev/umac/dfs/core/src/dfs_process_radar_found_ind.h
++++ qca-wifi-g/cmn_dev/umac/dfs/core/src/dfs_process_radar_found_ind.h
+@@ -233,4 +233,22 @@ dfs_set_nol_subchannel_marking(struct wl
+ int
+ dfs_get_nol_subchannel_marking(struct wlan_dfs *dfs,
+ 			       bool *nol_subchannel_marking);
++				   
++
++#ifdef WLAN_DFS_FULL_OFFLOAD
++/**
++ * dfs_inc_num_radar - Increment radar detect stats for FO.
++ *
++ * @dfs: Pointer to the wlan_dfs object.
++ *
++ * Return: void.
++ */
++void dfs_inc_num_radar(struct wlan_dfs *dfs);
++#else
++static inline void dfs_inc_num_radar(struct wlan_dfs *dfs)
++{
++}
++#endif
++
++
+ #endif /*_DFS_PROCESS_RADAR_FOUND_IND_H_ */

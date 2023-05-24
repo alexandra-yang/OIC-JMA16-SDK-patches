@@ -1,0 +1,18 @@
+ACL should not only reject auth/associations, but also
+ignore probe requests and not send out probe responses
+to avoid needless churn and discoveries from pods from
+different neighboring locations.
+
+--- a/umac/mlme/ieee80211_mgmt_bss.c
++++ b/umac/mlme/ieee80211_mgmt_bss.c
+@@ -362,6 +362,10 @@ ieee80211_recv_probereq(struct ieee80211
+     if (ieee80211_bsteering_is_probe_resp_wh(vap, wh->i_addr2)) {
+         return 0;
+     }
++    /* Ignore probe request from blocked mac address*/
++    if (!ieee80211_acl_check(vap, wh->i_addr2)) {
++ return 0;
++    }
+ #else
+     /* To silence compiler warning about unused variable. */
+     (void) rs;

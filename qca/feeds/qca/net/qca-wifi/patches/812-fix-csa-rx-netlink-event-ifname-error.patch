@@ -1,0 +1,33 @@
+fixed csa rx netlink event send error interface name soc0
+
+---
+
+diff --git a/os/linux/src/osif_umac.c b/os/linux/src/osif_umac.c
+index 11196cd..c32b895 100755
+--- a/os/linux/src/osif_umac.c
++++ b/os/linux/src/osif_umac.c
+@@ -13890,17 +13890,18 @@ void ieee80211_mgmt_sta_send_csa_rx_nl_msg(
+         qdf_err("ic is null");
+         return;
+     }
+-    if (!ic->ic_osdev){
++    if (!ic->ic_netdev){
+         qdf_err("ic->ic_osdev is null");
+         return;
+     }
+-    dev = (void *)ic->ic_osdev->netdev;
++    dev = (void *)ic->ic_netdev;
+     if (!dev){
+         qdf_err("dev is null");
+         return;
+     }
+ 
+-    qdf_info("valid=%d chan=%d width=%d sec=%d cfreq2=%d\n",
++    qdf_info("ifname=%s valid=%d chan=%d width=%d sec=%d cfreq2=%d\n",
++            dev->name,
+             csa_rx_ev.valid,
+             csa_rx_ev.chan,
+             csa_rx_ev.width_mhz,
+-- 
+2.25.1
+
