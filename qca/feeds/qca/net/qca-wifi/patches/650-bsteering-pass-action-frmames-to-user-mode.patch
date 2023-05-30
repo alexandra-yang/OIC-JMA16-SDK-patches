@@ -1,0 +1,48 @@
+pass action frames to user mode and
+handle them in hostapd
+
+Pass:
+- Neighbor Report Request
+- BSS TM Query
+  This is for future use. Today didn't saw station that call
+  this request. But if will do, we will see this in hostapd
+  logs. Also newest hostapd handle this query correctly.
+
+- BSS TM Resp
+  After we will request BSS TM, we would like to know status
+  from the station. Idea is to handle this in the BM.
+  Today at least we will see hostapd log with the status.
+
+--- a/umac/rrm/ieee80211_rrm.c
++++ b/umac/rrm/ieee80211_rrm.c
+@@ -80,6 +80,7 @@ int ieee80211_rrm_recv_action(wlan_if_t
+                     (struct ieee80211_action_rm_req *)frm, frm_len);
+             break;
+         case IEEE80211_ACTION_RM_RESP:
++			return -1;
+             ieee80211_recv_radio_measurement_rsp(vap, ni,
+                     frm, frm_len);
+             break;
+@@ -89,6 +90,7 @@ int ieee80211_rrm_recv_action(wlan_if_t
+             ieee80211_recv_lm_rsp(vap, ni,frm, frm_len);
+             break;
+         case IEEE80211_ACTION_NR_REQ:
++			return -1;
+            ieee80211_recv_neighbor_req(vap, ni,
+                     (struct ieee80211_action_nr_req *)frm, frm_len);
+             break;
+--- a/umac/wnm/ieee80211_wnm.c
++++ b/umac/wnm/ieee80211_wnm.c
+@@ -374,10 +374,12 @@ int ieee80211_wnm_recv_action(wlan_if_t
+ 
+     switch (action) {
+     case IEEE80211_ACTION_BSTM_QUERY:
++		return -EINVAL;
+         ieee80211_recv_bstm_query(vap, ni,
+                  (struct ieee80211_action_bstm_query *)frm, frm_len);
+         break;
+     case IEEE80211_ACTION_BSTM_RESP:
++		return -EINVAL;
+         ieee80211_recv_bstm_resp(vap, ni,
+                  (struct ieee80211_action_bstm_resp *)frm, frm_len);
+         break;

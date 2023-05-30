@@ -1,0 +1,187 @@
+Index: qca-wifi-gd32eb43-dirty/include/_ieee80211.h
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/include/_ieee80211.h
++++ qca-wifi-gd32eb43-dirty/include/_ieee80211.h
+@@ -383,6 +383,7 @@ struct ieee80211_ath_channel {
+     uint16_t        ic_vhtop_freq_seg1;           /* seg1 Center Channel frequency */
+     uint16_t        ic_vhtop_freq_seg2;           /* Seg2 center Channel frequency index for 80+80MHz mode or
+ 						   * center Channel frequency of operating span for 160Mhz mode */
++    u_int16_t        ic_dfs_state;
+ };
+ 
+ struct ieee80211_vap_info {
+Index: qca-wifi-gd32eb43-dirty/os/linux/tools/exttool.c
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/os/linux/tools/exttool.c
++++ qca-wifi-gd32eb43-dirty/os/linux/tools/exttool.c
+@@ -16,6 +16,7 @@
+ #include <qcatools_lib.h>
+ #include <ol_if_thermal.h>
+ #include <ext_ioctl_drv_if.h>
++#include <wlan_dfs_ioctl.h>
+ 
+ #include "os/linux/include/ieee80211_external.h"
+ #define FALSE   0
+@@ -223,6 +224,26 @@ int validate_scan_param( wifi_scan_custo
+     return 0;
+ }
+ 
++static char *show_dfs_state(u_int16_t event)
++{
++     switch (event) {
++         case WLAN_EV_RADAR_DETECTED:
++             return "DFS_RADAR_DETECT";
++         case WLAN_EV_CAC_STARTED:
++             return "DFS_CAC_STARTED";
++         case WLAN_EV_CAC_COMPLETED:
++             return "DFS_CAC_COMPLETED";
++         case WLAN_EV_NOL_STARTED:
++             return "DFS_NOP_START";
++         case WLAN_EV_NOL_FINISHED:
++             return "DFS_NOP_FINISHED";
++         default:
++             break;
++     }
++   return "unknown";
++}
++
++
+ static void show_chaninfo(struct ieee80211req_chaninfo *chans)
+ {
+     int i;
+@@ -233,6 +254,8 @@ static void show_chaninfo(struct ieee802
+         printf("chan %d", chan->ic_ieee);
+         if (chan->ic_flagext & IEEE80211_CHAN_DFS)
+             printf(" %s", "DFS");
++            if (chan->ic_flagext & IEEE80211_CHAN_DFS)
++                printf(" %s", show_dfs_state(chan->ic_dfs_state));
+         printf("\n");
+     }
+ }
+@@ -254,6 +277,7 @@ static void show_chaninfo_full(struct ie
+         printf("\tic_antennamax: %d\n", chan->ic_antennamax);
+         printf("\tic_vhtop_freq_seg1: %d\n", chan->ic_vhtop_freq_seg1);
+         printf("\tic_vhtop_freq_seg2: %d\n", chan->ic_vhtop_freq_seg1);
++        printf("\tic_dfs_state: %d\n", chan->ic_dfs_state);
+     }
+ }
+ 
+Index: qca-wifi-gd32eb43-dirty/umac/base/ieee80211_config.c
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/umac/base/ieee80211_config.c
++++ qca-wifi-gd32eb43-dirty/umac/base/ieee80211_config.c
+@@ -5462,6 +5462,7 @@ int _wlan_get_chaninfo(struct ieee80211c
+             chan[*nchan].ic_maxregpower = c->ic_maxregpower;
+             chan[*nchan].ic_minpower = c->ic_minpower;
+             chan[*nchan].ic_maxpower = c->ic_maxpower;
++            chan[*nchan].ic_dfs_state = c->ic_dfs_state;
+ 
+             if(flag == 0) {
+                 if(IEEE80211_IS_CHAN_11AC_VHT80(c) ||
+Index: qca-wifi-gd32eb43-dirty/umac/base/ieee80211_vap.c
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/umac/base/ieee80211_vap.c
++++ qca-wifi-gd32eb43-dirty/umac/base/ieee80211_vap.c
+@@ -71,6 +71,8 @@ void acfg_clean(struct ieee80211com *ic)
+ 
+ static void ieee80211_roam_initparams(wlan_if_t vap);
+ 
++void dfs_reset_channels(struct ieee80211com *ic);
++
+ #if DYNAMIC_BEACON_SUPPORT
+ static OS_TIMER_FUNC(ieee80211_dbeacon_suspend_beacon)
+ {
+@@ -1658,6 +1660,10 @@ wlan_vap_create(wlan_dev_t            de
+         qdf_nofl_info("%s: failed to create a vap object\n", __func__);
+         return NULL;
+     }
++    if (ic->ic_num_ap_vaps == 0) {
++        dfs_reset_channels(ic);
++    }
++
+ #if UMAC_SUPPORT_VAP_PAUSE
+     ieee80211_vap_pause_late_vattach(ic,vap);
+ #endif
+Index: qca-wifi-gd32eb43-dirty/umac/include/ieee80211_channel.h
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/umac/include/ieee80211_channel.h
++++ qca-wifi-gd32eb43-dirty/umac/include/ieee80211_channel.h
+@@ -140,6 +140,8 @@ ieee80211_get_phymode_from_chan_flag(
+         struct ieee80211_ath_channel *curchan,
+         uint64_t chan_flag);
+ 
++void dfs_set_channel_state(struct ieee80211com *ic, u_int16_t freq, enum WLAN_DFS_EVENTS event);
++
+ INLINE static u_int64_t
+ ieee80211_chan_flags(struct ieee80211_ath_channel *chan)
+ {
+Index: qca-wifi-gd32eb43-dirty/umac/mlme/ieee80211_mlme_dfs.c
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/umac/mlme/ieee80211_mlme_dfs.c
++++ qca-wifi-gd32eb43-dirty/umac/mlme/ieee80211_mlme_dfs.c
+@@ -1660,6 +1660,45 @@ void ieee80211_dfs_deliver_event(struct
+ }
+ qdf_export_symbol(ieee80211_dfs_deliver_event);
+ 
++void dfs_reset_channels(struct ieee80211com *ic)
++{
++    u_int16_t freq;
++    int i;
++
++    for (i = 0; i < ic->ic_nchans; i++) {
++        if (!(ic->ic_channels[i].ic_flagext & IEEE80211_CHAN_DFS))
++            continue;
++
++            ic->ic_channels[i].ic_dfs_state = WLAN_EV_NOL_FINISHED;
++            if (freq != ic->ic_channels[i].ic_freq) {
++                freq = ic->ic_channels[i].ic_freq;
++                ieee80211_dfs_deliver_event(ic, freq, WLAN_EV_NOL_FINISHED);
++            }
++    }
++
++}
++
++void dfs_set_channel_state(struct ieee80211com *ic, u_int16_t freq, enum WLAN_DFS_EVENTS event)
++{
++    struct ieee80211_ath_channel *channel;
++    int i;
++
++    /*
++     * ic_channels already contain multiple entries for same control
++     * frequency, each for different phy mode. Update them all.
++     */
++    for(i = 0; i < ic->ic_nchans; i++) {
++        channel = &ic->ic_channels[i];
++
++        if (channel->ic_freq != freq)
++            continue;
++
++        channel->ic_dfs_state = event;
++    }
++}
++EXPORT_SYMBOL(dfs_set_channel_state);
++
++
+ void ieee80211_dfs_deliver_events(struct ieee80211com *ic, struct ieee80211_ath_channel *chan, enum WLAN_DFS_EVENTS event)
+ {
+     struct ieee80211_ath_channel_list chan_info;
+@@ -1671,6 +1710,7 @@ void ieee80211_dfs_deliver_events(struct
+     {
+         if (chan_info.cl_channels[i] == NULL)
+             continue;
++        dfs_set_channel_state(ic, chan_info.cl_channels[i]->ic_freq, event);
+         ieee80211_dfs_deliver_event(ic, chan_info.cl_channels[i]->ic_freq, event);
+     }
+ }
+Index: qca-wifi-gd32eb43-dirty/umac/mlme/ieee80211_mlme_dfs_interface.c
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/umac/mlme/ieee80211_mlme_dfs_interface.c
++++ qca-wifi-gd32eb43-dirty/umac/mlme/ieee80211_mlme_dfs_interface.c
+@@ -445,6 +445,7 @@ void mlme_dfs_deliver_event(struct wlan_
+     if(ic == NULL)
+         return;
+ 
++    dfs_set_channel_state(ic, freq, event);
+     ieee80211_dfs_deliver_event(ic, freq, event);
+ }
+ 

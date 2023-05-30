@@ -1,0 +1,22 @@
+Reduce log level for ignored events for foreign interfaces.
+
+Here is an example of spammed logs:
+
+Dec  8 14:10:02 hostapd: nl80211: Ignored event 103 (NL80211_CMD_VENDOR) for foreign interface (ifindex 21 wdev 0x0)
+Dec  8 14:10:02 hostapd: nl80211: Ignored event 103 (NL80211_CMD_VENDOR) for foreign interface (ifindex 21 wdev 0x0)
+Dec  8 14:10:02 hostapd: nl80211: Ignored event 103 (NL80211_CMD_VENDOR) for foreign interface (ifindex 21 wdev 0x0)
+Dec  8 14:10:02 hostapd: nl80211: Ignored event 103 (NL80211_CMD_VENDOR) for foreign interface (ifindex 21 wdev 0x0)
+Dec  8 14:10:02 hostapd: nl80211: Ignored event 103 (NL80211_CMD_VENDOR) for foreign interface (ifindex 21 wdev 0x0)
+Index: src/drivers/driver_nl80211_event.c
+===================================================================
+--- a/src/drivers/driver_nl80211_event.c
++++ b/src/drivers/driver_nl80211_event.c
+@@ -2872,7 +2872,7 @@ int process_global_event(struct nl_msg *
+ 				return NL_SKIP;
+ 			}
+ 		}
+-		wpa_printf(MSG_DEBUG,
++		wpa_printf(MSG_MSGDUMP,
+ 			   "nl80211: Ignored event %d (%s) for foreign interface (ifindex %d wdev 0x%llx)",
+ 			   gnlh->cmd, nl80211_command_to_string(gnlh->cmd),
+ 			   ifidx, (long long unsigned int) wdev_id);

@@ -1,0 +1,71 @@
+--- a/include/ext_ioctl_drv_if.h
++++ b/include/ext_ioctl_drv_if.h
+@@ -131,6 +131,8 @@ typedef struct _wifi_channel_switch_requ
+      * before channel change is triggered.
+      */
+     u_int8_t                    num_csa;
++   /* Force switch, even same channel */
++   u_int8_t                    force;
+ } wifi_channel_switch_request_t;
+ 
+ typedef struct _wifi_repeater_move_request {
+--- a/os/linux/src/ext_ioctl_drv_if.c
++++ b/os/linux/src/ext_ioctl_drv_if.c
+@@ -271,7 +271,7 @@ ieee80211_trigger_channel_switch (struct
+     }
+ 
+     /* if current channel and BW is same as requested, we are done. */
+-    if (ch == tgt_ch) {
++    if (ch == tgt_ch && !request->force) {
+         IEEE80211_DPRINTF_IC(ic, IEEE80211_VERBOSE_NORMAL, IEEE80211_MSG_EXTIOCTL_CHANSWITCH,
+                 "%s: Requested chanel is same as current operating channel\n", __func__);
+         /* Set same_chan flag for repeater move case */
+@@ -290,6 +290,7 @@ ieee80211_trigger_channel_switch (struct
+     ic->ic_chanchange_chanflag = flags;
+     ic->ic_chanchange_chan_freq = cfreq1;
+     ic->ic_repeater_move.same_chan = false;
++   ic->ic_chanchange_force = request->force;
+     /* Use user supplied value of num_csa if its present.
+      * Otherwise use default count.
+      */
+--- a/os/linux/tools/exttool.c
++++ b/os/linux/tools/exttool.c
+@@ -508,6 +508,7 @@ int main(int argc, char *argv[])
+         {"idletime",      required_argument, NULL, 'l'},
+         {"list",          no_argument,       NULL, 'y'},
+         {"list-full",     no_argument,       NULL, 'Y'},
++        {"force",         no_argument,       NULL, 'j'},
+         {0,               0,                 0,     0},
+     };
+
+@@ -619,6 +620,9 @@ int main(int argc, char *argv[])
+             case 'l': /* idle time  */
+                 extended_cmd.ext_data.channel_scan_req.idle_time = atoi(optarg);
+                 break;
++           case 'j':
++               channel_switch_req.force = 1;
++               break;
+             case 'e': /* channel to scan  */
+                 extended_cmd.ext_data.channel_scan_req.chanlist.n_chan = atoi(optarg);
+                 while (count < extended_cmd.ext_data.channel_scan_req.chanlist.n_chan) {
+--- a/umac/include/ieee80211_var.h
++++ b/umac/include/ieee80211_var.h
+@@ -1048,6 +1048,7 @@ typedef struct ieee80211com {
+     u_int16_t                     ic_chanchange_chwidth;
+     struct ieee80211_ath_channel      *ic_chanchange_channel;
+     u_int64_t                     ic_chanchange_chanflag; //e.g. IEEE80211_CHAN_11AC_VHT40PLUS
++   u_int8_t                      ic_chanchange_force;
+     u_int32_t                     ic_mcst_of_rootap; /* Maximum channel switch time received from the root AP */
+     bool                          ic_has_rootap_done_cac; /* Check if the RootAP has done CAC in the target channel */
+     struct ieee80211_ath_channel     *ic_tx_next_ch;
+--- a/umac/mlme/ieee80211_beacon.c
++++ b/umac/mlme/ieee80211_beacon.c
+@@ -3057,7 +3057,7 @@ static int ieee80211_change_channel(
+             }
+         }
+
+-        if (ic->ic_curchan != c) {
++        if (ic->ic_curchan != c || ic->ic_chanchange_force) {
+             ieee80211_chan_switch_to_new_chan(vap, c);
+         } else {
+             struct ieee80211vap *transmit_vap = NULL; 

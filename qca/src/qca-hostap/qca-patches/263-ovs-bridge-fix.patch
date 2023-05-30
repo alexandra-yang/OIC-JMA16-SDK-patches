@@ -1,6 +1,5 @@
-diff -urN --show-c-function a/src/drivers/linux_ioctl.c b/src/drivers/linux_ioctl.c
---- a/src/drivers/linux_ioctl.c	2019-12-13 19:42:09.547942115 +0530
-+++ b/src/drivers/linux_ioctl.c	2019-12-13 20:09:05.939966549 +0530
+--- a/src/drivers/linux_ioctl.c
++++ b/src/drivers/linux_ioctl.c
 @@ -15,6 +15,64 @@
  #include "common/linux_bridge.h"
  #include "linux_ioctl.h"
@@ -108,7 +107,7 @@ diff -urN --show-c-function a/src/drivers/linux_ioctl.c b/src/drivers/linux_ioct
  	ifindex = if_nametoindex(ifname);
  	if (ifindex == 0)
  		return -1;
-@@ -198,12 +263,44 @@ int linux_br_get(char *brname, const cha
+@@ -198,12 +263,47 @@ int linux_br_get(char *brname, const cha
  {
  	char path[128], brlink[128], *pos;
  	ssize_t res;
@@ -130,6 +129,9 @@ diff -urN --show-c-function a/src/drivers/linux_ioctl.c b/src/drivers/linux_ioct
 -		return -1;
 +	if(res < 0)
 +	{
++		/* If the OVS bridge is not configured, return without checking further */
++		if (!ovs_vswitchd_running()) return -1;
++
 +		/*
 +		 * Interface is not in a native linux bridge, check if it is an OVS
 +		 * bridge -- unfortunately there's no other simple way but to run

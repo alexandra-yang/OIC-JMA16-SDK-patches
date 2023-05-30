@@ -1,0 +1,287 @@
+Index: qca-wifi-gd32eb43-dirty/include/ieee80211_api.h
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/include/ieee80211_api.h
++++ qca-wifi-gd32eb43-dirty/include/ieee80211_api.h
+@@ -1618,15 +1618,7 @@ int wlan_set_fixed_rate(wlan_if_t vaphan
+  *           returns  ENOENT if no fixed rate.
+  */
+ int wlan_get_fixed_rate(wlan_if_t vaphandle, ieee80211_rate_info *rate);
+-
+-/**
+- * get channel info
+- * @param vaphandle     : handle to vap
+- * @param chans         : channel info
+- * @param nchan         : number of channels
+- */
+-int wlan_get_chaninfo(wlan_if_t vaphandle, int flag, struct ieee80211_ath_channel *chans, int *nchan);
+-
++int _wlan_get_chaninfo(struct ieee80211com *ic, int flag, struct ieee80211_ath_channel *chans, int *nchan);
+ /**
+  * get channel list
+  * @param vaphandle     : handle to vap
+Index: qca-wifi-gd32eb43-dirty/offload/os/linux/ol_ath_linux.c
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/offload/os/linux/ol_ath_linux.c
++++ qca-wifi-gd32eb43-dirty/offload/os/linux/ol_ath_linux.c
+@@ -2417,6 +2417,9 @@ int ol_ath_extended_commands(struct net_
+             error = ieee80211_extended_ioctl_rep_move(dev, ic,
+                     (caddr_t)&(extended_cmd->ext_data.rep_move_req));
+             break;
++        case EXTENDED_SUBIOCTL_GET_CHANINFO:
++            error = ieee80211_extended_ioctl_get_chaninfo(dev, ic, extended_cmd->data);
++            break;
+ #if ATH_SUPPORT_WRAP && DBDC_REPEATER_SUPPORT
+         case EXTENDED_SUBIOCTL_GET_PRIMARY_RADIO:
+             error = ol_ioctl_get_primary_radio(scn,
+Index: qca-wifi-gd32eb43-dirty/offload/wlan/include/ol_if_athvar.h
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/offload/wlan/include/ol_if_athvar.h
++++ qca-wifi-gd32eb43-dirty/offload/wlan/include/ol_if_athvar.h
+@@ -1926,6 +1926,8 @@ int
+ ieee80211_extended_ioctl_rep_move (struct net_device *dev,
+                 struct ieee80211com *ic, caddr_t param);
+ 
++int ieee80211_extended_ioctl_get_chaninfo(struct net_device *dev,
++                struct ieee80211com *ic, caddr_t *param);
+ #if ATH_PROXY_NOACK_WAR
+ int32_t ol_ioctl_get_proxy_noack_war(struct ol_ath_softc_net80211 *scn, caddr_t param);
+ int32_t ol_ioctl_reserve_proxy_macaddr (struct ol_ath_softc_net80211 *scn, caddr_t *param);
+Index: qca-wifi-gd32eb43-dirty/os/linux/src/ext_ioctl_drv_if.c
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/os/linux/src/ext_ioctl_drv_if.c
++++ qca-wifi-gd32eb43-dirty/os/linux/src/ext_ioctl_drv_if.c
+@@ -620,6 +620,33 @@ int ieee80211_extended_ioctl_chan_switch
+     return error;
+ }
+ 
++int ieee80211_extended_ioctl_get_chaninfo(struct net_device *dev,
++        struct ieee80211com *ic,
++        caddr_t *param)
++{
++    struct ieee80211req_chaninfo *channel;
++    int nchans_max = ((IEEE80211_CHANINFO_MAX - 1) * sizeof(__u32))/
++                                         sizeof(struct ieee80211_ath_channel);
++    int result;
++
++    channel = (struct ieee80211req_chaninfo *)OS_MALLOC(ic->ic_osdev, sizeof(*channel), GFP_KERNEL);
++    if (channel == NULL)
++        return -ENOMEM;
++
++    _wlan_get_chaninfo(ic, 0, channel->ic_chans, &channel->ic_nchans);
++
++    if (channel->ic_nchans > nchans_max) {
++        channel->ic_nchans = nchans_max;
++    }
++
++    result = _copy_to_user(param , channel, channel->ic_nchans *
++                           sizeof(struct ieee80211_ath_channel) + (2 * sizeof(__u32)));
++    OS_FREE(channel);
++
++    return result;
++}
++EXPORT_SYMBOL(ieee80211_extended_ioctl_get_chaninfo);
++
+ QDF_STATUS
+ ieee80211_update_scan_channel_phymode (struct ieee80211vap *vap,
+                                        ieee80211_freqlist_t *freqlist,
+Index: qca-wifi-gd32eb43-dirty/os/linux/src/ieee80211_cfg80211.c
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/os/linux/src/ieee80211_cfg80211.c
++++ qca-wifi-gd32eb43-dirty/os/linux/src/ieee80211_cfg80211.c
+@@ -3906,6 +3906,8 @@ void wlan_cfg80211_acs_report_channel(wl
+ #define CHAN_INFO_ATTR_FLAGS_2 \
+     QCA_WLAN_VENDOR_EXTERNAL_ACS_EVENT_CHAN_INFO_ATTR_FLAGS_2
+ 
++int wlan_get_chaninfo(wlan_if_t vaphandle, int flag, struct ieee80211_ath_channel *chan, int *nchan);
++
+ /**
+  * cfg80211_update_channel_info() - add channel info attributes
+  * @skb: pointer to sk buff
+Index: qca-wifi-gd32eb43-dirty/os/linux/src/ieee80211_wireless.c
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/os/linux/src/ieee80211_wireless.c
++++ qca-wifi-gd32eb43-dirty/os/linux/src/ieee80211_wireless.c
+@@ -7903,6 +7903,8 @@ ieee80211_ioctl_getchanlist(struct net_d
+     return wlan_get_chanlist(vap, extra);
+ }
+ 
++int wlan_get_chaninfo(wlan_if_t vaphandle, int flag, struct ieee80211_ath_channel *chan, int *nchan);
++
+ /**
+  * @brief
+  *     - Function description:\n
+Index: qca-wifi-gd32eb43-dirty/os/linux/tools/exttool.c
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/os/linux/tools/exttool.c
++++ qca-wifi-gd32eb43-dirty/os/linux/tools/exttool.c
+@@ -17,6 +17,7 @@
+ #include <ol_if_thermal.h>
+ #include <ext_ioctl_drv_if.h>
+ 
++#include "os/linux/include/ieee80211_external.h"
+ #define FALSE   0
+ #define TRUE    1
+ #define MAX_INTERFACE_NAME_LEN    20
+@@ -222,6 +223,40 @@ int validate_scan_param( wifi_scan_custo
+     return 0;
+ }
+ 
++static void show_chaninfo(struct ieee80211req_chaninfo *chans)
++{
++    int i;
++    struct ieee80211_ath_channel *chan;
++
++    for (i = 0; i < chans->ic_nchans; i++) {
++        chan = &chans->ic_chans[i];
++        printf("chan %d", chan->ic_ieee);
++        if (chan->ic_flagext & IEEE80211_CHAN_DFS)
++            printf(" %s", "DFS");
++        printf("\n");
++    }
++}
++
++static void show_chaninfo_full(struct ieee80211req_chaninfo *chans)
++{
++    int i;
++    struct ieee80211_ath_channel *chan;
++
++    for (i = 0; i < chans->ic_nchans; i++) {
++        chan = &chans->ic_chans[i];
++        printf("chan %d (%d)\n", chan->ic_ieee, chan->ic_freq);
++        printf("\tic_flags: 0x%08x\n", chan->ic_flags);
++        printf("\tic_flagext: 0x%04x\n", chan->ic_flagext);
++        printf("\tic_maxregpower: %ddBm\n", chan->ic_maxregpower);
++        printf("\tic_maxpower: %ddBm\n", chan->ic_maxpower);
++        printf("\tic_minpower: %ddBm\n", chan->ic_minpower);
++        printf("\tic_regClassId: %d\n", chan->ic_regClassId);
++        printf("\tic_antennamax: %d\n", chan->ic_antennamax);
++        printf("\tic_vhtop_freq_seg1: %d\n", chan->ic_vhtop_freq_seg1);
++        printf("\tic_vhtop_freq_seg2: %d\n", chan->ic_vhtop_freq_seg1);
++    }
++}
++
+ /*
+  * handle_thermal_main: handles thermal main function
+  * @argc: total number of command line arguments
+@@ -416,6 +451,8 @@ int main(int argc, char *argv[])
+     int i = 0;
+     int band = 0;
+     int bssid[BSSID_LEN];
++    static struct ieee80211req_chaninfo chans;
++    int chans_full = 0;
+ 
+     if (strcmp (argv[0], "thermaltool") == 0) {
+         handle_thermal_main (argc, argv);
+@@ -445,16 +482,19 @@ int main(int argc, char *argv[])
+         {"bssid",         required_argument, NULL, 'b'},
+         {"maxscantime",   required_argument, NULL, 't'},
+         {"idletime",      required_argument, NULL, 'l'},
++        {"list",          no_argument,       NULL, 'y'},
++        {"list-full",     no_argument,       NULL, 'Y'},
+         {0,               0,                 0,     0},
+     };
+ 
+-    if (argc < 6) {
++    if (argc < 4) {
+         print_usage();
+         return -1;
+     }
+ 
+     memset(&extended_cmd.ext_data.channel_switch_req, 0, sizeof(wifi_channel_switch_request_t));
+     memset(&extended_cmd.ext_data.channel_scan_req, 0, sizeof(wifi_scan_custom_request_cmd_t));
++    memset(&chans, 0, sizeof(chans));
+ 
+     /* Set channel width by default to MAX. Incase channel switch is triggered
+      * with no channel width information provided, we use the channel width
+@@ -470,7 +510,7 @@ int main(int argc, char *argv[])
+ 
+     while (TRUE)
+     {
+-        option = getopt_long (argc, argv, "hi:csz:a:w:n:o:f:u:d:x:r:m:ge:pq:b:t:l",
++        option = getopt_long (argc, argv, "hi:csa:w:n:o:f:d:x:r:m:e:pq:b:t:lyY",
+                 exttool_long_options, &index);
+ 
+         if (option == -1) {
+@@ -499,6 +539,14 @@ int main(int argc, char *argv[])
+                     return -1;
+                 }
+                 break;
++            case 'y': /* Get channel info */
++                subioctl_cmd = EXTENDED_SUBIOCTL_GET_CHANINFO;
++                break;
++            case 'Y': /* Get channel info */
++                subioctl_cmd = EXTENDED_SUBIOCTL_GET_CHANINFO;
++                chans_full = 1;
++                break;
++
+             case 'c': /* Channel switch request */
+                 subioctl_cmd = EXTENDED_SUBIOCTL_CHANNEL_SWITCH;
+                 break;
+@@ -630,9 +678,16 @@ int main(int argc, char *argv[])
+         extended_cmd.ext_data.channel_switch_req.band = band;
+         extended_cmd.ext_data.rep_move_req.chan_switch_req = extended_cmd.ext_data.channel_switch_req;
+         extended_cmd.data_len = sizeof(repeater_move_req);
++    } else if (subioctl_cmd == EXTENDED_SUBIOCTL_GET_CHANINFO) {
++        extended_cmd.data = (caddr_t)&chans;
++        extended_cmd.data_len = sizeof(chans);
+     }
+ 
+     ext_send_command(ifname, (void *)&extended_cmd, sizeof(struct extended_ioctl_wrapper));
+     destroy_socket_context(&sock_ctx);
++
++    if (subioctl_cmd == EXTENDED_SUBIOCTL_GET_CHANINFO)
++         chans_full ? show_chaninfo_full(&chans) : show_chaninfo(&chans);
++
+     return 0;
+ }
+Index: qca-wifi-gd32eb43-dirty/umac/base/ieee80211_config.c
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/umac/base/ieee80211_config.c
++++ qca-wifi-gd32eb43-dirty/umac/base/ieee80211_config.c
+@@ -5414,7 +5414,7 @@ int wlan_get_chanlist(wlan_if_t vaphandl
+ }
+ 
+ 
+-int wlan_get_chaninfo(wlan_if_t vaphandle, int flag, struct ieee80211_ath_channel *chan, int *nchan)
++int _wlan_get_chaninfo(struct ieee80211com *ic, int flag, struct ieee80211_ath_channel *chan, int *nchan)
+ {
+ #define IS_NEW_CHANNEL(c)		\
+ 	((IEEE80211_IS_CHAN_5GHZ((c)) && ((c)->ic_freq > 5000) && isclr(reported_a, (c)->ic_ieee)) || \
+@@ -5422,8 +5422,8 @@ int wlan_get_chaninfo(wlan_if_t vaphandl
+ 	 (IEEE80211_IS_CHAN_2GHZ((c)) && isclr(reported_bg, (c)->ic_ieee)) || \
+ 	 (IEEE80211_IS_CHAN_6GHZ((c)) && isclr(reported_6Ghz, (c)->ic_ieee)))
+ 
+-    struct ieee80211vap *vap = vaphandle;
+-    struct ieee80211com *ic = vap->iv_ic;
++//    struct ieee80211vap *vap = vaphandle;
++//    struct ieee80211com *ic = vap->iv_ic;
+     u_int8_t reported_a[IEEE80211_CHAN_BYTES];
+     u_int8_t reported_bg[IEEE80211_CHAN_BYTES];
+     u_int8_t reported_49Ghz[IEEE80211_CHAN_BYTES];
+@@ -5526,6 +5526,14 @@ int wlan_get_chaninfo(wlan_if_t vaphandl
+ #undef IS_NEW_CHANNEL
+ }
+ 
++int wlan_get_chaninfo(wlan_if_t vaphandle, int flag, struct ieee80211_ath_channel *chan, int *nchan)
++{
++    struct ieee80211vap *vap = vaphandle;
++    struct ieee80211com *ic = vap->iv_ic;
++
++    return _wlan_get_chaninfo(ic, flag, chan, nchan);
++}
++
+ u_int32_t
+ wlan_get_HWcapabilities(wlan_dev_t devhandle, ieee80211_cap cap)
+ {
+Index: qca-wifi-gd32eb43-dirty/direct_attach/lmac/ath_dev/if_athioctl.h
+===================================================================
+--- qca-wifi-gd32eb43-dirty.orig/direct_attach/lmac/ath_dev/if_athioctl.h
++++ qca-wifi-gd32eb43-dirty/direct_attach/lmac/ath_dev/if_athioctl.h
+@@ -718,6 +718,7 @@ enum extended_ioctl_command {
+     EXTENDED_SUBIOCTL_GET_CHAN_VENDORSURVEY_INFO,
+     EXTENDED_SUBIOCTL_REPEATER_MOVE,
+     EXTENDED_SUBIOCTL_GET_CAC_STATE,
++	EXTENDED_SUBIOCTL_GET_CHANINFO,
+     /* Add New subioctls just above this comment */
+ };
+ 

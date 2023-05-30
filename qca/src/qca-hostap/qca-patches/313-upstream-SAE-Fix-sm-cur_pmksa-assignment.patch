@@ -1,0 +1,66 @@
+From cb285e80c4c0503e78f7e37c82901d82d265862b Mon Sep 17 00:00:00 2001
+From: Hu Wang <huw@codeaurora.org>
+Date: Mon, 25 Oct 2021 16:28:38 +0530
+Subject: [PATCH] SAE: Fix sm->cur_pmksa assignment
+
+Commit b0f457b6191 ("SAE: Do not expire the current PMKSA cache entry")
+depends on sm->cur_pmksa to determine if it is the current PMKSA cache
+entry, but sm->cur_pmksa was not always correct for SAE in the current
+implementation.
+
+Set sm->cur_pmksa in wpa_sm_set_pmk() (which is used with SAE), and skip
+clearing of sm->cur_pmksa for SAE in wpa_find_assoc_pmkid(). This latter
+case was added by commit c2080e8657f8 ("Clear current PMKSA cache
+selection on association/roam") for driver-based roaming indication and
+Suite B, so skipping it for SAE should be fine.
+
+Signed-off-by: Jouni Malinen <jouni@codeaurora.org>
+---
+ src/rsn_supp/wpa.c      |  8 +++++---
+ wpa_supplicant/events.c | 11 ++++++++---
+ 2 files changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/src/rsn_supp/wpa.c b/src/rsn_supp/wpa.c
+index 8aa649ac4..0a2f87787 100644
+--- a/src/rsn_supp/wpa.c
++++ b/src/rsn_supp/wpa.c
+@@ -3132,9 +3132,11 @@ void wpa_sm_set_pmk(struct wpa_sm *sm, const u8 *pmk, size_t pmk_len,
+ #endif /* CONFIG_IEEE80211R */
+ 
+ 	if (bssid) {
+-		pmksa_cache_add(sm->pmksa, pmk, pmk_len, pmkid, NULL, 0,
+-				bssid, sm->own_addr,
+-				sm->network_ctx, sm->key_mgmt, NULL);
++		sm->cur_pmksa = pmksa_cache_add(sm->pmksa, pmk, pmk_len,
++						pmkid, NULL, 0, bssid,
++						sm->own_addr,
++						sm->network_ctx, sm->key_mgmt,
++						NULL);
+ 	}
+ }
+ 
+diff --git a/wpa_supplicant/events.c b/wpa_supplicant/events.c
+index 7b892dac2..6fe3426d0 100644
+--- a/wpa_supplicant/events.c
++++ b/wpa_supplicant/events.c
+@@ -356,9 +356,14 @@ static void wpa_find_assoc_pmkid(struct wpa_supplicant *wpa_s)
+ 	struct wpa_ie_data ie;
+ 	int pmksa_set = -1;
+ 	size_t i;
+-
+-	/* Start with assumption of no PMKSA cache entry match */
+-	pmksa_cache_clear_current(wpa_s->wpa);
++	struct rsn_pmksa_cache_entry *cur_pmksa;
++
++	/* Start with assumption of no PMKSA cache entry match for cases other
++	 * than SAE. In particular, this is needed to generate the PMKSA cache
++	 * entries for Suite B cases with driver-based roaming indication. */
++	cur_pmksa = pmksa_cache_get_current(wpa_s->wpa);
++	if (cur_pmksa && !wpa_key_mgmt_sae(cur_pmksa->akmp))
++		pmksa_cache_clear_current(wpa_s->wpa);
+ 
+ 	if (wpa_sm_parse_own_wpa_ie(wpa_s->wpa, &ie) < 0 ||
+ 	    ie.pmkid == NULL)
+-- 
+2.17.1
+

@@ -1,0 +1,113 @@
+--- a/src/ap/drv_callbacks.c
++++ b/src/ap/drv_callbacks.c
+@@ -1727,7 +1727,7 @@ void wpa_supplicant_event(void *ctx, enu
+ 			level = MSG_EXCESSIVE;
+ 	}
+ 
+-	wpa_dbg(hapd->msg_ctx, level, "Event %s (%d) received",
++	wpa_dbg_rate_limit(hapd->msg_ctx, level, "Event %s (%d) received",
+ 		event_to_string(event), event);
+ #endif /* CONFIG_NO_STDOUT_DEBUG */
+ 
+--- a/src/drivers/driver_atheros.c
++++ b/src/drivers/driver_atheros.c
+@@ -915,7 +915,7 @@ static void atheros_raw_receive(void *ct
+ 
+ 	stype = WLAN_FC_GET_STYPE(fc);
+ 
+-	wpa_printf(MSG_DEBUG, "%s: subtype 0x%x len %d freq=%d",
++	wpa_printf_rate_limit(MSG_DEBUG, "%s: subtype 0x%x len %d freq=%d",
+ 		   __func__, stype, (int) len, freq);
+ 
+ 	if (stype == WLAN_FC_STYPE_PROBE_REQ) {
+@@ -1287,7 +1287,7 @@ atheros_wireless_event_wireless_custom(s
+ #ifndef MGMT_FRAM_TAG_SIZE
+ #define MGMT_FRAM_TAG_SIZE 30 /* hardcoded in driver */
+ #endif
+-	wpa_printf(MSG_DEBUG, "Custom wireless event: '%s'", custom);
++	wpa_printf_rate_limit(MSG_DEBUG, "Custom wireless event: '%s'", custom);
+ 
+ 	if (os_strncmp(custom, "MLME-MICHAELMICFAILURE.indication", 33) == 0) {
+ 		char *pos;
+--- a/src/utils/wpa_debug.c
++++ b/src/utils/wpa_debug.c
+@@ -519,6 +519,22 @@ void wpa_hexdump_ascii_key(int level, co
+ 	_wpa_hexdump_ascii(level, title, buf, len, wpa_debug_show_keys);
+ }
+ 
++int wpa_log_rate_limit_can_print(time_t* tstamp)
++{
++    struct timespec cur_tstamp;
++
++    if (clock_gettime(CLOCK_MONOTONIC_RAW, &cur_tstamp) != 0)
++        return 1;
++
++    if (*tstamp > cur_tstamp.tv_sec)
++        return 1;
++
++    if (difftime(cur_tstamp.tv_sec, *tstamp) <= WPA_LOG_DROP_PERIOD)
++        return 0;
++
++    *tstamp = cur_tstamp.tv_sec;
++    return 1;
++}
+ 
+ #ifdef CONFIG_DEBUG_FILE
+ static char *last_path = NULL;
+--- a/src/utils/wpa_debug.h
++++ b/src/utils/wpa_debug.h
+@@ -11,6 +11,7 @@
+ 
+ #include "wpabuf.h"
+ 
++#include <time.h>
+ extern int wpa_debug_level;
+ extern int wpa_debug_show_keys;
+ extern int wpa_debug_timestamp;
+@@ -39,6 +40,8 @@ enum {
+ #define wpa_debug_close_file() do { } while (0)
+ #define wpa_debug_setup_stdout() do { } while (0)
+ #define wpa_dbg(args...) do { } while (0)
++#define wpa_printf_rate_limit(args...) do { } while (0)
++#define wpa_dbg_rate_limit(args...) do { } while (0)
+ 
+ static inline int wpa_debug_reopen_file(void)
+ {
+@@ -158,6 +161,37 @@ void wpa_hexdump_ascii_key(int level, co
+  */
+ #define wpa_dbg(args...) wpa_msg(args)
+ 
++int wpa_log_rate_limit_can_print(time_t* tstamp);
++
++#define WPA_LOG_DROP_PERIOD 20 /* seconds */
++
++#define wpa_printf_rate_limit(args...)                            \
++    ({                                                            \
++        const unsigned int line_num = __LINE__ - 2;               \
++        static time_t tstamp = 0;                                 \
++        static int print_skipped_log = 1;                         \
++        if (wpa_log_rate_limit_can_print(&tstamp)) {              \
++             wpa_printf(args);                                    \
++             print_skipped_log = 1;                               \
++        }                                                         \
++        else {                                                    \
++            if (print_skipped_log) {                              \
++                print_skipped_log = 0;                            \
++                wpa_printf(MSG_DEBUG,                             \
++                    "Log at %s:%d were dropped by rate limiter",  \
++                    __FILE__, line_num);                          \
++            }                                                     \
++        }                                                         \
++    })
++
++#define wpa_dbg_rate_limit(args...)                  \
++    ({                                               \
++        static time_t tstamp = 0;                    \
++        if (wpa_log_rate_limit_can_print(&tstamp))   \
++             wpa_dbg(args);                          \
++    })
++
++
+ #endif /* CONFIG_NO_STDOUT_DEBUG */
+ 
+ 

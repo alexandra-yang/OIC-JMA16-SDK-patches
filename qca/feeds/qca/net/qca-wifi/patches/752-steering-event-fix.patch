@@ -1,0 +1,40 @@
+Index: qca-wifi/os/linux/src/ieee80211_cfg80211.c
+===================================================================
+--- qca-wifi.orig/os/linux/src/ieee80211_cfg80211.c
++++ qca-wifi/os/linux/src/ieee80211_cfg80211.c
+@@ -62,6 +62,9 @@
+ #include <osif_nss_wifiol_vdev_if.h>
+ #include <osif_nss_wifiol_if.h>
+ #endif
++#if QCA_SUPPORT_SON
++#include <wlan_son_pub.h>
++#endif
+ #define MAX_BUFFER_LEN 1180
+ #define RADIO_CMD 1
+ #define VAP_CMD 0
+@@ -2871,6 +2874,25 @@ int wlan_cfg80211_mgmt_tx(struct wiphy *
+         send_tx_status = false;
+     }
+ 
++#if QCA_SUPPORT_SON
++    if ((type == IEEE80211_FC0_TYPE_MGT) && (subtype == IEEE80211_FC0_SUBTYPE_DEAUTH)) {
++        struct bs_node_disassoc_ind disassoc_stats = {0};
++
++        if ( vap != NULL && mgmt_frm->macaddr != NULL )
++            ni = ieee80211_vap_find_node(vap, mgmt_frm->macaddr, WLAN_MLME_SB_ID);
++        if (vap->iv_opmode == IEEE80211_M_HOSTAP) {
++            if (ni != vap->iv_bss) {
++                if( ni != NULL && ni->peer_obj != NULL && vap != NULL ) {
++                    wlan_node_get_disassoc_stats(vap, ni->peer_obj, &disassoc_stats);
++                    IEEE80211_DELIVER_EVENT_MLME_DEAUTH_INDICATION(vap, ni->ni_macaddr, ni->ni_associd, IEEE80211_REASON_AUTH_EXPIRE);
++                    son_send_disconnect_event( vap->vdev_obj, ni->ni_macaddr, BSTEERING_SOURCE_LOCAL, BSTEERING_DEAUTH, IEEE80211_REASON_AUTH_EXPIRE, &disassoc_stats );
++                }
++            }
++        }
++        if (ni)
++            ieee80211_free_node(ni, WLAN_MLME_SB_ID);
++    }
++#endif
+     if ((type == IEEE80211_FC0_TYPE_MGT) && ((subtype == IEEE80211_FC0_SUBTYPE_ASSOC_RESP) ||(subtype == IEEE80211_FC0_SUBTYPE_REASSOC_RESP))) {
+         uint8_t elem_len;
+         uint8_t *ptr = (uint8_t *) mgmt->u.assoc_resp.variable ;

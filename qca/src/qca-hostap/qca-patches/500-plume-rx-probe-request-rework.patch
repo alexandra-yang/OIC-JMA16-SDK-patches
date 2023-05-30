@@ -1,0 +1,113 @@
+This changes hostapd behaviour. Arguably a new
+event should be introduced to prevent breaking
+expectations of existing users.
+
+Otherwise this does 2 things:
+
+ - report probe req as long as it can be prased at
+   all
+
+ - add ssid= metadata to know if given probe req
+   is directed at any of the driven BSSes
+
+ - add freq= metadata to know where probe req was
+   received
+
+This could be a much bigger change if it's
+supposed to be done "right". The report could be
+done after all the other logic parses the probe
+req allowing to infer and report _why_ a probe req
+was not handled.
+
+For the existing usecase this is sufficient.
+--- a/src/ap/ieee802_11.c
++++ b/src/ap/ieee802_11.c
+@@ -5037,7 +5037,7 @@ int ieee802_11_mgmt(struct hostapd_data
+ 	}
+ 
+ 	if (stype == WLAN_FC_STYPE_PROBE_REQ) {
+-		handle_probe_req(hapd, mgmt, len, ssi_signal);
++		handle_probe_req(hapd, mgmt, len, ssi_signal, freq);
+ 		return 1;
+ 	}
+ 
+--- a/src/ap/beacon.c
++++ b/src/ap/beacon.c
+@@ -804,7 +804,7 @@ void sta_track_claim_taxonomy_info(struc
+ 
+ void handle_probe_req(struct hostapd_data *hapd,
+ 		      const struct ieee80211_mgmt *mgmt, size_t len,
+-		      int ssi_signal)
++		      int ssi_signal, unsigned int freq)
+ {
+ 	u8 *resp;
+ 	struct ieee802_11_elems elems;
+@@ -817,6 +817,8 @@ void handle_probe_req(struct hostapd_dat
+ 	u16 csa_offs[2];
+ 	size_t csa_offs_len;
+ 	struct radius_sta rad_info;
++	int ssid_match_res;
++	const char *ssid_match_str = "";
+ 
+ 	if (len < IEEE80211_HDRLEN)
+ 		return;
+@@ -825,6 +827,25 @@ void handle_probe_req(struct hostapd_dat
+ 		sta_track_add(hapd->iface, mgmt->sa, ssi_signal);
+ 	ie_len = len - IEEE80211_HDRLEN;
+ 
++	if (ieee802_11_parse_elems(ie, ie_len, &elems, 0) == ParseFailed) {
++		wpa_printf(MSG_DEBUG, "Could not parse ProbeReq from " MACSTR,
++			   MAC2STR(mgmt->sa));
++		return;
++	}
++
++	ssid_match_res = ssid_match(hapd, elems.ssid, elems.ssid_len,
++				    elems.ssid_list, elems.ssid_list_len,
++				    elems.short_ssid_list, elems.short_ssid_list_len);
++	switch (ssid_match_res) {
++		case NO_SSID_MATCH: ssid_match_str = "foreign";
++		case EXACT_SSID_MATCH: ssid_match_str = "match";
++		case WILDCARD_SSID_MATCH: ssid_match_str = "wildcard";
++	}
++
++	wpa_msg_ctrl(hapd->msg_ctx, MSG_INFO, RX_PROBE_REQUEST "sa=" MACSTR
++		     " signal=%d ssid=%s freq=%d", MAC2STR(mgmt->sa), ssi_signal,
++		     ssid_match_str, freq);
++
+ 	ret = hostapd_allowed_address(hapd, mgmt->sa, (const u8 *) mgmt, len,
+ 				      &rad_info, 1);
+ 	if (ret == HOSTAPD_ACL_REJECT) {
+@@ -843,12 +864,6 @@ void handle_probe_req(struct hostapd_dat
+ 	if (!hapd->conf->send_probe_response)
+ 		return;
+ 
+-	if (ieee802_11_parse_elems(ie, ie_len, &elems, 0) == ParseFailed) {
+-		wpa_printf(MSG_DEBUG, "Could not parse ProbeReq from " MACSTR,
+-			   MAC2STR(mgmt->sa));
+-		return;
+-	}
+-
+ 	if ((!elems.ssid || !elems.supp_rates)) {
+ 		wpa_printf(MSG_DEBUG, "STA " MACSTR " sent probe request "
+ 			   "without SSID or supported rates element",
+@@ -1035,9 +1050,6 @@ void handle_probe_req(struct hostapd_dat
+ 	}
+ #endif /* CONFIG_TESTING_OPTIONS */
+ 
+-	wpa_msg_ctrl(hapd->msg_ctx, MSG_INFO, RX_PROBE_REQUEST "sa=" MACSTR
+-		     " signal=%d", MAC2STR(mgmt->sa), ssi_signal);
+-
+ 	resp = hostapd_gen_probe_resp(hapd, mgmt, elems.p2p != NULL,
+ 				      &resp_len);
+ 	if (resp == NULL)
+--- a/src/ap/beacon.h
++++ b/src/ap/beacon.h
+@@ -14,7 +14,7 @@ struct ieee80211_mgmt;
+ 
+ void handle_probe_req(struct hostapd_data *hapd,
+ 		      const struct ieee80211_mgmt *mgmt, size_t len,
+-		      int ssi_signal);
++		      int ssi_signal, unsigned int freq);
+ int ieee802_11_set_beacon(struct hostapd_data *hapd);
+ int ieee802_11_set_beacons(struct hostapd_iface *iface);
+ int ieee802_11_update_beacons(struct hostapd_iface *iface);

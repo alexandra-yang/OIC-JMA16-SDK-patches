@@ -1,0 +1,29 @@
+Reduce log level for RTM_NEWLINK messages since they are spamming wpas
+and hapd logs on 11ax platforms.
+
+Here is an example of spammed logs:
+
+  Nov 30 19:33:26 wpa_supplicant[2331]: RTM_NEWLINK: ifi_index=22 ifname=soc0 wext ifi_family=0 ifi_flags=0x0 ()
+  Nov 30 19:33:26 hostapd: RTM_NEWLINK: ifi_index=22 ifname=soc0 wext ifi_family=0 ifi_flags=0x0 ()
+  Nov 30 19:33:26 wpa_supplicant[2331]: RTM_NEWLINK: ifi_index=22 ifname=soc0 wext ifi_family=0 ifi_flags=0x0 ()
+  Nov 30 19:33:26 hostapd: RTM_NEWLINK: ifi_index=22 ifname=soc0 wext ifi_family=0 ifi_flags=0x0 ()
+  Nov 30 19:33:26 hostapd: RTM_NEWLINK: ifi_index=24 ifname=soc1 wext ifi_family=0 ifi_flags=0x0 ()
+  Nov 30 19:33:26 wpa_supplicant[2331]: RTM_NEWLINK: ifi_index=24 ifname=soc1 wext ifi_family=0 ifi_flags=0x0 ()
+  Nov 30 19:33:27 wpa_supplicant[2331]: RTM_NEWLINK: ifi_index=22 ifname=soc0 wext ifi_family=0 ifi_flags=0x0 ()
+  Nov 30 19:33:27 hostapd: RTM_NEWLINK: ifi_index=22 ifname=soc0 wext ifi_family=0 ifi_flags=0x0 ()
+  Nov 30 19:33:27 wpa_supplicant[2331]: RTM_NEWLINK: ifi_index=22 ifname=soc0 wext ifi_family=0 ifi_flags=0x0 ()
+  Nov 30 19:33:27 hostapd: RTM_NEWLINK: ifi_index=22 ifname=soc0 wext ifi_family=0 ifi_flags=0x0 ()
+  Nov 30 19:33:27 hostapd: RTM_NEWLINK: ifi_index=24 ifname=soc1 wext ifi_family=0 ifi_flags=0x0 ()
+  Nov 30 19:33:27 wpa_supplicant[2331]: RTM_NEWLINK: ifi_index=24 ifname=soc1 wext ifi_family=0 ifi_flags=0x0 ()
+
+--- a/src/drivers/driver_nl80211.c
++++ b/src/drivers/driver_nl80211.c
+@@ -1179,7 +1179,7 @@ static void wpa_driver_nl80211_event_rtm
+ 	}
+ 	extra[sizeof(extra) - 1] = '\0';
+ 
+-	wpa_printf(MSG_DEBUG, "RTM_NEWLINK: ifi_index=%d ifname=%s%s ifi_family=%d ifi_flags=0x%x (%s%s%s%s)",
++	wpa_printf((ifi->ifi_family || ifi->ifi_flags) ? MSG_DEBUG : MSG_EXCESSIVE, "RTM_NEWLINK: ifi_index=%d ifname=%s%s ifi_family=%d ifi_flags=0x%x (%s%s%s%s)",
+ 		   ifi->ifi_index, ifname, extra, ifi->ifi_family,
+ 		   ifi->ifi_flags,
+ 		   (ifi->ifi_flags & IFF_UP) ? "[UP]" : "",

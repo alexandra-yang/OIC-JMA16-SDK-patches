@@ -1,0 +1,22 @@
+--- a/src/drivers/driver_athr.c
++++ b/src/drivers/driver_athr.c
+@@ -2197,7 +2197,7 @@ static struct wpa_scan_results * driver_
+ 		pos += sizeof(*sr);
+ 		if (pos + sr->isr_ssid_len + sr->isr_ie_len > end)
+ 			break;
+-		wpa_printf(MSG_DEBUG, "%s: sr=%p next=%p sr->isr_ssid_len=%d "
++        wpa_printf(MSG_MSGDUMP, "%s: sr=%p next=%p sr->isr_ssid_len=%d "
+ 			   "sr->isr_ie_len=%d",
+ 			   __func__, sr, next, sr->isr_ssid_len,
+ 			   sr->isr_ie_len);
+--- a/wpa_supplicant/bss.c
++++ b/wpa_supplicant/bss.c
+@@ -462,7 +462,7 @@ static struct wpa_bss * wpa_bss_add(stru
+ 			    MAC2STR(bss->hessid));
+ 	else
+ 		extra[0] = '\0';
+-	wpa_dbg(wpa_s, MSG_DEBUG, "BSS: Add new id %u BSSID " MACSTR
++    wpa_dbg(wpa_s, MSG_MSGDUMP, "BSS: Add new id %u BSSID " MACSTR
+ 		" SSID '%s' freq %d%s",
+ 		bss->id, MAC2STR(bss->bssid), wpa_ssid_txt(ssid, ssid_len),
+ 		bss->freq, extra);

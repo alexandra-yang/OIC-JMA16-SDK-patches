@@ -1,0 +1,11 @@
+--- a/src/drivers/driver_athr.c
++++ b/src/drivers/driver_athr.c
+@@ -1416,7 +1416,7 @@ static void driver_atheros_event_rtm_new
+ 		return;
+ 
+ 	if (!driver_atheros_own_ifindex(drv, ifi->ifi_index, buf, len)) {
+-		wpa_printf(MSG_DEBUG, "Ignore event for foreign ifindex %d",
++        wpa_printf(MSG_EXCESSIVE, "Ignore event for foreign ifindex %d",
+ 			   ifi->ifi_index);
+ 		return;
+ 	}

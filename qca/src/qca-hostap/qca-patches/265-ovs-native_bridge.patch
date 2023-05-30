@@ -1,0 +1,50 @@
+Currently when hostapd is trying to add wireless interfaces to the 
+bridge, it checks if the bridge is an ovs bridge with the command ovs-vsctl.
+If it finds one, it adds the interface to the ovs bridge, otherwise it adds
+the interface to linux native bridge.
+
+This patch makes sure that vswitchd proces is running before calling ovs-vsctl to check
+for the birdge availability, since in native bridge there will be no vswitchd process running
+causing the hostapd process to hang
+--- a/src/drivers/linux_ioctl.c
++++ b/src/drivers/linux_ioctl.c
+@@ -32,6 +32,21 @@
+ })
+ 
+ static
++int ovs_vswitchd_running(void)
++{
++	char buf[128] = {};
++	char *p = NULL;
++	FILE *f;
++
++	f = popen("pgrep ovs-vswitchd", "r");
++	p = fgets(buf, sizeof(buf), f);
++	if (p) wpa_printf(MSG_DEBUG, "ovs-vswitchd pid %s", p);
++
++	if (f) pclose(f);
++	return (p != NULL);
++}
++
++static
+ int does_br_exists(const char *brname)
+ {
+ 	char buf[128];
+@@ -209,7 +224,7 @@ int linux_br_add_if(int sock, const char
+ 	struct ifreq ifr;
+ 	int ifindex;
+ 
+-    if(does_br_exists(brname)) {
++    if(ovs_vswitchd_running() && does_br_exists(brname)) {
+         return ovs_br_add_if(brname,ifname);
+     }
+ 
+@@ -238,7 +253,7 @@ int linux_br_del_if(int sock, const char
+ 	struct ifreq ifr;
+ 	int ifindex;
+ 
+-    if(does_br_exists(brname)) {
++    if(ovs_vswitchd_running() && does_br_exists(brname)) {
+         return ovs_br_del_if(brname,ifname);
+     }
+ 

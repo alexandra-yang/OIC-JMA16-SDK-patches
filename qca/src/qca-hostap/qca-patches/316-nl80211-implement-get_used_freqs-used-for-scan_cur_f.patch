@@ -1,0 +1,154 @@
+From e508b097a9b87621ad6a775a3b20283cce13e0a2 Mon Sep 17 00:00:00 2001
+From: Michal Kazior <michal@plume.com>
+Date: Wed, 16 Nov 2022 09:49:26 +0100
+Subject: [PATCH 2/2] nl80211: implement get_used_freqs() used for
+ scan_cur_freq
+
+Signed-off-by: Michal Kazior <michal@plume.com>
+---
+ src/drivers/driver_nl80211.c | 109 +++++++++++++++++++++++++++++++++++
+ 1 file changed, 109 insertions(+)
+
+diff --git a/src/drivers/driver_nl80211.c b/src/drivers/driver_nl80211.c
+index 2ee34d11d..b3a181678 100644
+--- a/src/drivers/driver_nl80211.c
++++ b/src/drivers/driver_nl80211.c
+@@ -11622,6 +11622,129 @@ static int nl80211_dpp_listen(void *priv, bool enable)
+ }
+ #endif /* CONFIG_DPP */
+ 
++struct nl80211_get_used_freqs_arg {
++	int *freq_array;
++	unsigned int len;
++	unsigned int idx;
++	int wiphy_idx;
++};
++
++static int nl80211_get_used_freqs_handler(struct nl_msg *msg, void *arg)
++{
++	struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
++	struct nl80211_get_used_freqs_arg *ctx = arg;
++	struct nlattr *tb[NL80211_ATTR_MAX + 1];
++	static struct nla_policy policy[NL80211_ATTR_MAX + 1] = {
++		[NL80211_ATTR_WDEV] = { .type = NLA_U64 },
++		[NL80211_ATTR_WIPHY] = { .type = NLA_U32 },
++		[NL80211_ATTR_WIPHY_FREQ] = { .type = NLA_U32 },
++		[NL80211_ATTR_SSID] = { .type = NLA_UNSPEC },
++	};
++	unsigned long long wdev;
++	unsigned int freq;
++	int wiphy;
++	int i;
++	bool duplicate = false;
++
++	nla_parse(tb, NL80211_ATTR_MAX, genlmsg_attrdata(gnlh, 0),
++		  genlmsg_attrlen(gnlh, 0), policy);
++
++	if (!tb[NL80211_ATTR_WDEV] ||
++	    !tb[NL80211_ATTR_WIPHY] ||
++	    !tb[NL80211_ATTR_WIPHY_FREQ] ||
++	    !tb[NL80211_ATTR_SSID]) {
++		/* If interface is down SSID is expected to be unset.
++		 * Otherwise, if all other attributes are set as well,
++		 * then it can be considered as a channel-occupying
++		 * interface.
++		 */
++		return NL_SKIP;
++	}
++
++	wiphy = nla_get_u32(tb[NL80211_ATTR_WIPHY]);
++	if (wiphy != ctx->wiphy_idx) {
++		/* Older nl80211 protocol does not respect WIPHY
++		 * filtering from the command so we still need to
++		 * double-check if WIPHY matches here.
++		 */
++		return NL_SKIP;
++	}
++
++	wdev = nla_get_u64(tb[NL80211_ATTR_WDEV]),
++	freq = nla_get_u32(tb[NL80211_ATTR_WIPHY_FREQ]);
++
++	for (i = 0; i < ctx->idx; i++) {
++		if (ctx->freq_array[i] == freq) {
++			duplicate = true;
++		}
++	}
++
++	if (ctx->idx < ctx->len) {
++		wpa_printf(MSG_DEBUG,
++			   "nl80211: appending wdev=%llu frequency=%d (idx=%u len=%u) ",
++			   wdev, freq, ctx->idx, ctx->len);
++
++		ctx->freq_array[ctx->idx] = freq;
++	}
++	else {
++		if (duplicate) {
++			/* Frequency already added to the list.
++			 * Nothing to be done here...
++			 */
++			goto out;
++		}
++		/* This shouldn't really happen in practice because
++		 * it's expected get_used_freqs() will be called based
++		 * on max channel number derived from interface
++		 * combinations.
++		 */
++		wpa_printf(MSG_ERROR,
++			   "nl80211: spilling wdev=%llu frequency=%d, len=%u too small to fit ",
++			   wdev, freq, ctx->len);
++	}
++
++out:
++	ctx->idx++;
++	return NL_SKIP;
++}
++
++static int nl80211_get_used_freqs(void *priv,
++				  int *freq_array,
++				  unsigned int len)
++{
++	struct i802_bss *bss = priv;
++	struct wpa_driver_nl80211_data *drv = bss->drv;
++	struct nl_msg *msg;
++	int ret = -1;
++	struct nl80211_get_used_freqs_arg arg = {
++		.freq_array = freq_array,
++		.len = len,
++		.idx = 0,
++		.wiphy_idx = nl80211_get_wiphy_index(bss),
++	};
++
++	wpa_printf(MSG_DEBUG,
++		   "nl80211: Determining used frequencies on %s's radio (wiphy=%d len=%u)",
++		   bss->ifname, arg.wiphy_idx, len);
++
++	if (arg.wiphy_idx == -1) {
++		return -1;
++	}
++
++	msg = nl80211_drv_msg(drv, NLM_F_DUMP, NL80211_CMD_GET_INTERFACE);
++	if (!msg || nla_put_u32(msg, NL80211_ATTR_WIPHY, arg.wiphy_idx)) {
++		nlmsg_free(msg);
++		return -1;
++	}
++
++	ret = send_and_recv_msgs(drv, msg, nl80211_get_used_freqs_handler,
++				 &arg, NULL, NULL);
++	if (ret) {
++		return -1;
++	}
++
++	return arg.idx;
++}
+ 
+ const struct wpa_driver_ops wpa_driver_nl80211_ops = {
+ 	.name = "nl80211",
+@@ -11761,4 +11869,5 @@ const struct wpa_driver_ops wpa_driver_nl80211_ops = {
+ #ifdef CONFIG_DPP
+ 	.dpp_listen = nl80211_dpp_listen,
+ #endif /* CONFIG_DPP */
++	.get_used_freqs = nl80211_get_used_freqs,
+ };
+-- 
+2.38.1
+
