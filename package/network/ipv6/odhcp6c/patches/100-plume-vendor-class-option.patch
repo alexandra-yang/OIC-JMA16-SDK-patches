@@ -1,0 +1,90 @@
+--- a/src/dhcpv6.c
++++ b/src/dhcpv6.c
+@@ -206,6 +206,8 @@ enum {
+ 	IOV_SRV_ID,
+ 	IOV_VENDOR_CLASS_HDR,
+ 	IOV_VENDOR_CLASS,
++	IOV_VENDOR_SPECIFIC_HDR,
++	IOV_VENDOR_SPECIFIC,
+ 	IOV_USER_CLASS_HDR,
+ 	IOV_USER_CLASS,
+ 	IOV_RECONF_ACCEPT,
+@@ -425,6 +427,15 @@ static void dhcpv6_send(enum dhcpv6_msg
+ 		uint16_t length;
+ 	} user_class_hdr = {htons(DHCPV6_OPT_USER_CLASS), htons(user_class_len)};
+ 
++	// Build vendor-specific option
++	size_t vendor_specific_len;
++	struct dhcpv6_vendorspecific *vendor_specific = odhcp6c_get_state(STATE_VENDORSPECIFIC, &vendor_specific_len);
++
++	struct {
++		uint16_t type;
++		uint16_t length;
++	} vendor_specific_hdr = {htons(DHCPV6_OPT_VENDOR_SPECIFIC), htons(vendor_specific_len)};
++
+ 	// Prepare Header
+ 	size_t oro_len;
+ 	void *oro = odhcp6c_get_state(STATE_ORO, &oro_len);
+@@ -451,6 +462,8 @@ static void dhcpv6_send(enum dhcpv6_msg
+ 		[IOV_SRV_ID] = {srv_id, srv_id_len},
+ 		[IOV_VENDOR_CLASS_HDR] = {&vendor_class_hdr, vendor_class_len ? sizeof(vendor_class_hdr) : 0},
+ 		[IOV_VENDOR_CLASS] = {vendor_class, vendor_class_len},
++		[IOV_VENDOR_SPECIFIC_HDR] = {&vendor_specific_hdr, vendor_specific_len ? sizeof(vendor_specific_hdr) : 0},
++		[IOV_VENDOR_SPECIFIC] = {vendor_specific, vendor_specific_len},
+ 		[IOV_USER_CLASS_HDR] = {&user_class_hdr, user_class_len ? sizeof(user_class_hdr) : 0},
+ 		[IOV_USER_CLASS] = {user_class, user_class_len},
+ 		[IOV_RECONF_ACCEPT] = {&reconf_accept, sizeof(reconf_accept)},
+--- a/src/odhcp6c.c
++++ b/src/odhcp6c.c
+@@ -75,7 +75,7 @@ int main(_unused int argc, char* const a
+ 	int c;
+ 	unsigned int client_options = DHCPV6_CLIENT_FQDN | DHCPV6_ACCEPT_RECONFIGURE;
+ 
+-	while ((c = getopt(argc, argv, "S::N:V:P:FB:c:i:r:Ru:s:kt:m:hedp:fav")) != -1) {
++	while ((c = getopt(argc, argv, "S::N:V:X:P:FB:c:i:r:Ru:s:kt:m:hedp:fav")) != -1) {
+ 		switch (c) {
+ 		case 'S':
+ 			allow_slaac_only = (optarg) ? atoi(optarg) : -1;
+@@ -102,6 +102,16 @@ int main(_unused int argc, char* const a
+ 			odhcp6c_add_state(STATE_VENDORCLASS, buf, l);
+ 
+ 			break;
++
++		case 'X':
++			l = script_unhexlify(buf, sizeof(buf), optarg);
++			if (!l)
++				help=true;
++
++			odhcp6c_add_state(STATE_VENDORSPECIFIC, buf, l);
++
++			break;
++
+ 		case 'P':
+ 			if (ia_pd_mode == IA_MODE_NONE)
+ 				ia_pd_mode = IA_MODE_TRY;
+@@ -432,6 +442,7 @@ static int usage(void)
+ 	"	-P <length>	Request IPv6-Prefix (0 = auto)\n"
+ 	"	-F		Force IPv6-Prefix\n"
+ 	"	-V <class>	Set vendor-class option (base-16 encoded)\n"
++	"	-X <options>	Set vendor-specific option (base-16 encoded)\n"
+ 	"	-u <user-class> Set user-class option string\n"
+ 	"	-c <clientid>	Override client-ID (base-16 encoded 16-bit type + value)\n"
+ 	"	-i <iface-id>	Use a custom interface identifier for RA handling\n"
+--- a/src/odhcp6c.h
++++ b/src/odhcp6c.h
+@@ -49,6 +49,7 @@ enum dhcvp6_opt {
+ 	DHCPV6_OPT_RAPID_COMMIT = 14,
+ 	DHCPV6_OPT_USER_CLASS = 15,
+ 	DHCPV6_OPT_VENDOR_CLASS = 16,
++	DHCPV6_OPT_VENDOR_SPECIFIC = 17,
+ 	DHCPV6_OPT_RECONF_MESSAGE = 19,
+ 	DHCPV6_OPT_RECONF_ACCEPT = 20,
+ 	DHCPV6_OPT_DNS_SERVERS = 23,
+@@ -258,6 +259,7 @@ enum odhcp6c_state {
+ 	STATE_RA_SEARCH,
+ 	STATE_AFTR_NAME,
+ 	STATE_VENDORCLASS,
++	STATE_VENDORSPECIFIC,
+ 	STATE_USERCLASS,
+ 	STATE_CER,
+ 	STATE_S46_MAPT,

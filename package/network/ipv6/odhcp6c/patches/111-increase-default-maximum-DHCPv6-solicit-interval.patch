@@ -1,0 +1,19 @@
+Subject: [PATCH] odhcp6c: Increase default maximum DHCPv6 solicit interval
+from 120s to 3600s.
+
+The current default value for SOL_MAX_RT appears to be 120s as specified in
+the original RFC3315 in 2003. However, in 2013 RFC7083 updated this value to
+3600s. This updated default value is still valid in the current DHCPv6
+specification RFC8415.
+
+--- a/src/odhcp6c.h
++++ b/src/odhcp6c.h
+@@ -26,7 +26,7 @@
+ #define ND_OPT_RECURSIVE_DNS 25
+ #define ND_OPT_DNSSL 31
+ 
+-#define DHCPV6_SOL_MAX_RT 120
++#define DHCPV6_SOL_MAX_RT 3600
+ #define DHCPV6_REQ_MAX_RT 30
+ #define DHCPV6_CNF_MAX_RT 4
+ #define DHCPV6_REN_MAX_RT 600
